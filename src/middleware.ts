@@ -5,14 +5,14 @@ import type { NextRequest } from "next/server";
 
 export async function middleware(req: NextRequest) {
   const PUBLIC_PATHS = ["/login", "/register", "/api/auth"];
-
+  
   // Get JWT token from cookie (NextAuth)
   const token = await getToken({
     req,
     secret: process.env.NEXTAUTH_SECRET,
     secureCookie: process.env.NODE_ENV === "production",
   });
-
+  // console.log("Middleware token:", token);
   const pathname = req.nextUrl.pathname;
 
   // 1️⃣ Redirect logged-in users away from login/registerv
@@ -38,5 +38,5 @@ export async function middleware(req: NextRequest) {
 
 // Apply middleware only to protected routes
 export const config = {
-  matcher: ["/dashboard/:path*", "/ide/:path*", "/login", "/register"],
+  matcher: ["/dashboard/:path*", "/ide/:path*", "/login", "/register","/"],
 };

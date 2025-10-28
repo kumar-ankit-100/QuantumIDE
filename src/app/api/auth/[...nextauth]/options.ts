@@ -39,7 +39,9 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       // on sign-in, attach user id
+      console.log("JWT callback user:", token);
       if (user) {
+
         token.user = user;
       }
       return token;

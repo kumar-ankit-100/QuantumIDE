@@ -12,8 +12,7 @@ import {
 import { 
   File, 
   Folder, 
-  FolderOpen, 
-  RefreshCw,
+  FolderOpen,
   Code2,
   Code,
   Save
@@ -21,6 +20,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import ChatPanel from './ChatPanel';
 
 // Define the props type
 interface MultiTerminalProps {
@@ -58,6 +58,8 @@ export default function IDEPage() {
   const [hostPort, setHostPort] = useState<number | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [selectedText, setSelectedText] = useState<string>('');
+  const [selectedLineRange, setSelectedLineRange] = useState<string>('');
 
   // Load file tree
   useEffect(() => {
@@ -306,6 +308,25 @@ export default function IDEPage() {
                         theme="vs-dark"
                         value={fileContent}
                         onChange={(value) => setFileContent(value || '')}
+                        onMount={(editor) => {
+                          // Track text selection
+                          editor.onDidChangeCursorSelection((e) => {
+                            const selection = editor.getModel()?.getValueInRange(e.selection);
+                            if (selection && selection.trim()) {
+                              setSelectedText(selection);
+                              const startLine = e.selection.startLineNumber;
+                              const endLine = e.selection.endLineNumber;
+                              setSelectedLineRange(
+                                startLine === endLine 
+                                  ? `${startLine}` 
+                                  : `${startLine}-${endLine}`
+                              );
+                            } else {
+                              setSelectedText('');
+                              setSelectedLineRange('');
+                            }
+                          });
+                        }}
                         options={{
                           minimap: { enabled: false },
                           fontSize: 14,
@@ -340,70 +361,17 @@ export default function IDEPage() {
 
         <ResizableHandle />
 
-        {/* Preview */}
+        {/* Preview & AI Chat Panel */}
         <ResizablePanel defaultSize={30} minSize={20}>
-          <div className="h-full flex flex-col bg-gradient-to-br from-slate-900/80 via-slate-950/90 to-slate-900/80 backdrop-blur-sm rounded-lg overflow-hidden border border-slate-800/50 shadow-2xl transition-all duration-300 hover:border-purple-500/30">
-            <div className="border-b border-slate-700/50 px-4 py-2 flex items-center justify-between bg-gradient-to-r from-slate-800/60 to-slate-900/60">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-purple-500 animate-pulse shadow-lg shadow-purple-500/50"></div>
-                <span className="text-sm font-medium text-slate-300">Preview</span>
-                {hostPort && (
-                  <span className="text-xs text-slate-500 px-2 py-0.5 rounded bg-slate-800/50">
-                    :{hostPort}
-                  </span>
-                )}
-              </div>
-              <Button 
-                size="sm" 
-                variant="ghost" 
-                onClick={refreshPreview}
-                className="hover:bg-slate-800/50 transition-all duration-200 hover:scale-110"
-              >
-                <RefreshCw className="w-4 h-4 text-purple-400" />
-              </Button>
-            </div>
-            <div className="flex-1 bg-white rounded-b-lg overflow-hidden">
-              {previewUrl ? (
-                <iframe
-                  key={previewUrl} 
-                  id="preview-iframe"
-                  src={previewUrl}
-                  className="w-full h-full border-0"
-                  title="Preview"
-                  onError={(e) => {
-                    console.error('Iframe failed to load:', e);
-                  }}
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-slate-900/50 to-slate-950/50 p-8 text-center">
-                  <div className="space-y-4 max-w-md p-8 rounded-xl bg-gradient-to-br from-slate-800/30 to-slate-900/30 backdrop-blur-sm border border-slate-700/30">
-                    <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
-                      <RefreshCw className="w-8 h-8 text-purple-400 animate-spin-slow" />
-                    </div>
-                    <p className="mb-4 font-medium text-lg text-slate-300">Preview Not Available</p>
-                    <div className="space-y-3 text-sm">
-                      <p className="font-medium text-slate-400">Start the dev server with:</p>
-                      <code className="block bg-slate-950/80 px-4 py-3 rounded-lg text-left font-mono text-green-400 border border-slate-700/50">
-                        npm run dev -- --host 0.0.0.0
-                      </code>
-                      <p className="text-xs text-slate-500 mt-4">
-                        The <code className="text-purple-400">--host 0.0.0.0</code> flag allows the server to be accessible from outside the container
-                      </p>
-                      <Button 
-                        onClick={refreshPreview} 
-                        variant="outline" 
-                        size="sm"
-                        className="mt-4 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white border-0 transition-all duration-200 shadow-lg hover:shadow-purple-500/50"
-                      >
-                        <RefreshCw className="w-3 h-3 mr-2" />
-                        Try Refresh
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <ChatPanel 
+            projectId={projectId}
+            currentFile={selectedFile}
+            fileContent={fileContent}
+            selectedText={selectedText}
+            selectedLineRange={selectedLineRange}
+            previewUrl={previewUrl}
+            hostPort={hostPort}
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

@@ -62,8 +62,12 @@ export default function CodeEditorPage() {
   const [isServerRunning, setIsServerRunning] = useState(false);
   const [serverPort, setServerPort ] = useState("null");
   const [showPreview, setShowPreview] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [gitStatus, setGitStatus] = useState<{
+    hasChanges: boolean;
+    branch: string;
+    lastCommit: string;
+  } | null>(null);
+  const [isPushing, setIsPushing] = useState(false);
 
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const syncTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -95,35 +99,27 @@ export default function CodeEditorPage() {
       .catch((err) => console.error("Failed to load file:", err));
   }, [currentFile, projectId]);
 
-  // Auto-sync to S3 every 30 seconds
+  // Check Git status periodically
   useEffect(() => {
-    const syncToS3 = async () => {
-      if (isSyncing) return;
-
-      setIsSyncing(true);
+    const checkGitStatus = async () => {
       try {
-        await fetch("/api/projects/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId }),
-        });
-        setLastSync(new Date());
+        const res = await fetch(`/api/projects/sync?projectId=${projectId}`);
+        if (res.ok) {
+          const status = await res.json();
+          setGitStatus(status);
+        }
       } catch (err) {
-        console.error("S3 sync failed:", err);
-      } finally {
-        setIsSyncing(false);
+        console.error("Git status check failed:", err);
       }
     };
 
-    // Initial sync
-    syncToS3();
+    // Initial check
+    checkGitStatus();
 
-    // Periodic sync
-    syncTimerRef.current = setInterval(syncToS3, 30000); // Every 30s
+    // Periodic check every 10 seconds
+    const interval = setInterval(checkGitStatus, 10000);
 
-    return () => {
-      if (syncTimerRef.current) clearInterval(syncTimerRef.current);
-    };
+    return () => clearInterval(interval);
   }, [projectId]);
 
   // Cleanup on unmount/tab close
@@ -278,24 +274,45 @@ export default function CodeEditorPage() {
     }
   };
 
-  const manualSync = async () => {
-    setIsSyncing(true);
+  const [showGitModal, setShowGitModal] = useState(false);
+  const [commitMessage, setCommitMessage] = useState("Save from QuantumIDE");
+  const [githubRepoUrl, setGithubRepoUrl] = useState("");
+
+  const commitAndPush = async () => {
+    setShowGitModal(true);
+  };
+
+  const handleGitSync = async () => {
+    setIsPushing(true);
     try {
       const res = await fetch("/api/projects/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId }),
+        body: JSON.stringify({ 
+          projectId,
+          repoUrl: githubRepoUrl || undefined,
+          message: commitMessage,
+        }),
       });
 
       if (res.ok) {
-        setLastSync(new Date());
-        alert("Project synced to S3 successfully!");
+        const data = await res.json();
+        alert(data.message);
+        setShowGitModal(false);
+        // Refresh git status
+        const statusRes = await fetch(`/api/projects/sync?projectId=${projectId}`);
+        if (statusRes.ok) {
+          setGitStatus(await statusRes.json());
+        }
+      } else {
+        const error = await res.json();
+        alert(`Git sync failed: ${error.error}`);
       }
     } catch (err) {
-      console.error("Manual sync failed:", err);
-      alert("Failed to sync to S3");
+      console.error("Git sync failed:", err);
+      alert("Failed to commit/push");
     } finally {
-      setIsSyncing(false);
+      setIsPushing(false);
     }
   };
 
@@ -354,15 +371,7 @@ export default function CodeEditorPage() {
     return `${Math.floor(diff / 3600)}h ago`;
   };
 
-  const formatLastSync = () => {
-    if (!lastSync) return "Never";
-    const now = new Date();
-    const diff = Math.floor((now.getTime() - lastSync.getTime()) / 1000);
 
-    if (diff < 60) return "just now";
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    return `${Math.floor(diff / 3600)}h ago`;
-  };
 
   return (
     <div className="flex h-screen bg-gray-900">
@@ -380,23 +389,88 @@ export default function CodeEditorPage() {
             </button>
           </div>
 
-          {/* S3 Sync Status */}
+          {/* Git Status */}
           <div className="mb-3 p-2 bg-gray-700 rounded text-xs">
             <div className="flex items-center justify-between mb-1">
-              <span className="font-semibold">☁️ S3 Sync</span>
-              <span className={isSyncing ? "text-yellow-400" : "text-green-400"}>
-                {isSyncing ? "Syncing..." : "✓ Synced"}
+              <span className="font-semibold">🔀 Git Status</span>
+              <span className={gitStatus?.hasChanges ? "text-yellow-400" : "text-green-400"}>
+                {gitStatus?.hasChanges ? "● Modified" : "✓ Clean"}
               </span>
             </div>
-            <div className="text-gray-400 text-xs">Last: {formatLastSync()}</div>
+            {gitStatus && (
+              <>
+                <div className="text-gray-400 text-xs mb-1">
+                  Branch: {gitStatus.branch}
+                </div>
+                <div className="text-gray-400 text-xs mb-2 truncate" title={gitStatus.lastCommit}>
+                  {gitStatus.lastCommit}
+                </div>
+              </>
+            )}
             <button
-              onClick={manualSync}
-              disabled={isSyncing}
-              className="w-full mt-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-xs py-1 px-2 rounded"
+              onClick={commitAndPush}
+              disabled={isPushing}
+              className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white text-xs py-1 px-2 rounded"
             >
-              {isSyncing ? "Syncing..." : "Sync Now"}
+              {isPushing ? "Pushing..." : "Commit & Push"}
             </button>
           </div>
+
+          {/* GitHub Modal */}
+          {showGitModal && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+                <h3 className="text-lg font-bold mb-4 text-white">Commit & Push to GitHub</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      GitHub Repository URL
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="https://github.com/user/repo.git (optional)"
+                      value={githubRepoUrl}
+                      onChange={(e) => setGithubRepoUrl(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">
+                      Leave empty to commit locally only
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1">
+                      Commit Message
+                    </label>
+                    <input
+                      type="text"
+                      value={commitMessage}
+                      onChange={(e) => setCommitMessage(e.target.value)}
+                      className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-white text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-6">
+                  <button
+                    onClick={() => setShowGitModal(false)}
+                    className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded text-white text-sm"
+                    disabled={isPushing}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleGitSync}
+                    className="flex-1 px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded text-white text-sm disabled:bg-gray-600"
+                    disabled={isPushing}
+                  >
+                    {isPushing ? "Syncing..." : "Commit & Push"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Server Controls */}
           <div className="mb-4 p-3 bg-gray-700 rounded">

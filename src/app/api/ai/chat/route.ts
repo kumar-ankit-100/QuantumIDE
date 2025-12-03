@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { withErrorHandler } from "@/middleware/withErrorHandler";
+import { withRateLimit } from "@/middleware/withRateLimit";
+import { logger } from "@/lib/logger";
 
 // Initialize Gemini AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
@@ -47,7 +50,7 @@ Do not hallucinate libraries; detect installed dependencies from package.json.
 
 Be concise but helpful. Prioritize actionable code over theory.`;
 
-export async function POST(req: NextRequest) {
+async function chatHandler(req: NextRequest) {
   try {
     const { projectId, currentFile, fileContent, messages } = await req.json();
 
@@ -128,10 +131,17 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error: any) {
-    console.error('AI Chat error:', error);
+    logger.error('AI Chat error', error);
     return NextResponse.json(
       { error: error.message || 'Failed to process AI request' },
       { status: 500 }
     );
   }
 }
+
+export const POST = withErrorHandler(
+  withRateLimit(chatHandler as any, {
+    interval: 60 * 1000, // 1 minute
+    maxRequests: 30, // 30 AI requests per minute
+  })
+);

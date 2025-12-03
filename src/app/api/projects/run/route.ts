@@ -44,16 +44,25 @@ export async function POST(request: Request) {
         url: `http://localhost:${port}`,
       });
     }
-    console.log(`Stalajsdf;lkja;lsdjfla;sdjlkfajds;lfrting dev server on port: ${port}`);
+    console.log(`Starting dev server on port: ${port}`);
+
+    if (!tempContainer) {
+      return NextResponse.json(
+        { error: "Container not found" },
+        { status: 404 }
+      );
+    }
+
+    const containerInstance = docker.getContainer(tempContainer.Id);
 
     // Start dev server
-    const container = await startDevServer(projectId, port);
+    const result = await startDevServer(containerInstance, port);
 
     return NextResponse.json({
       message: "Development server started",
-      containerId: container.id,
-      port,
-      url: `http://localhost:${port}`,
+      containerId: result.container.id,
+      port: result.hostPort,
+      url: `http://localhost:${result.hostPort}`,
     });
   } catch (err: any) {
     console.error(`[${new Date().toISOString()}] Failed to start dev server: ${err.message}`);

@@ -7,7 +7,6 @@ import {
   deleteFileFromContainer
 } from "@/lib/containerFileHelpers";
 import { updateContainerActivity } from "@/lib/containerManager";
-import { uploadFileToS3 } from "@/lib/s3";
 
 /**
  * GET - Read file from container
@@ -58,20 +57,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const container = await getContainerByProjectId(projectId);
-    console.log("Obtained container:", container.id);
     
     if (!container) {
       return NextResponse.json({ error: "Container not found" }, { status: 404 });
     }
 
+    console.log("Obtained container:", container.id);
+
     await writeFileToContainer(container.id, `/app/${filePath}`, content);
     
     updateContainerActivity(`${projectId}-dev`);
-
-    // Backup to S3 async
-    uploadFileToS3(projectId, filePath, content).catch(err => {
-      console.error(`[S3] Backup failed: ${err.message}`);
-    });
 
     return NextResponse.json({ success: true });
     

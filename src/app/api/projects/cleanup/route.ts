@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const projectFolder = path.join(PROJECTS_DIR, projectId);
 
   try {
-    // await cleanupProject(projectId, projectFolder, deleteS3Files || false);
+    await cleanupProject(projectId, projectFolder, false);
     
     return NextResponse.json({ 
       success: true, 

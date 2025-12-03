@@ -18,6 +18,23 @@ export default function TerminalComponent({ projectId, terminalId, autoStartDevS
   const fitAddonRef = useRef<FitAddon | null>(null);
   const devServerProcessRef = useRef<boolean>(false);
   const logStreamIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const projectMetadataRef = useRef<{ serverConfig?: { type?: string } } | null>(null);
+
+  // Fetch project metadata on mount
+  useEffect(() => {
+    const fetchMetadata = async () => {
+      try {
+        const res = await fetch(`/api/projects/${projectId}/metadata`);
+        if (res.ok) {
+          const data = await res.json();
+          projectMetadataRef.current = data;
+        }
+      } catch (err) {
+        console.error('Failed to fetch project metadata:', err);
+      }
+    };
+    fetchMetadata();
+  }, [projectId]);
 
   // Cleanup function to stop dev server
   const stopDevServer = async () => {
@@ -135,8 +152,12 @@ export default function TerminalComponent({ projectId, terminalId, autoStartDevS
           if (currentCommand.trim()) {
             let cmd = currentCommand.trim();
             
-            // Auto-add --host 0.0.0.0 if user types npm run dev without it
-            if (cmd === 'npm run dev' || cmd === 'vite') {
+            // Auto-add --host 0.0.0.0 ONLY for Vite projects, not Next.js
+            // Next.js already has -H 0.0.0.0 configured in package.json
+            const serverType = projectMetadataRef.current?.serverConfig?.type || 'vite';
+            const isNextJS = serverType === 'nextjs';
+            
+            if (!isNextJS && (cmd === 'npm run dev' || cmd === 'vite')) {
               cmd = cmd + ' -- --host 0.0.0.0';
               term.writeln(`\x1b[2m(Auto-added: -- --host 0.0.0.0)\x1b[0m`);
             }

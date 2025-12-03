@@ -182,3 +182,92 @@ export async function syncLocalToS3(
   await uploadDirectoryToS3(projectId, localPath);
   console.log(`[S3] Sync completed for ${projectId}`);
 }
+
+/**
+ * Sync container files to S3 (extract via tar, upload)
+ */
+export async function syncContainerToS3(
+  container: any,
+  projectId: string,
+  containerPath: string = "/app"
+): Promise<void> {
+  console.log(`[S3] Syncing container ${projectId} to S3...`);
+  
+  const tar = await import('tar-stream');
+  const extract = tar.extract();
+  
+  const tarStream = await container.getArchive({ path: containerPath });
+  
+  const fileBuffers: { [path: string]: Buffer } = {};
+  
+  extract.on('entry', (header, stream, next) => {
+    const chunks: Buffer[] = [];
+    
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('end', () => {
+      if (header.type === 'file') {
+        // Remove leading "app/" from path
+        const relativePath = header.name.replace(/^app\//, '');
+        if (relativePath) {
+          fileBuffers[relativePath] = Buffer.concat(chunks);
+        }
+      }
+      next();
+    });
+    stream.resume();
+  });
+  
+  await new Promise<void>((resolve, reject) => {
+    extract.on('finish', () => resolve());
+    extract.on('error', reject);
+    tarStream.pipe(extract);
+  });
+  
+  // Upload all files to S3
+  const uploadPromises = Object.entries(fileBuffers).map(([filePath, content]) =>
+    uploadFileToS3(projectId, filePath, content)
+  );
+  
+  await Promise.all(uploadPromises);
+  console.log(`[S3] Uploaded ${uploadPromises.length} files from container to S3`);
+}
+
+/**
+ * Restore project from S3 into container (download + putArchive)
+ */
+export async function restoreContainerFromS3(
+  container: any,
+  projectId: string,
+  containerPath: string = "/app"
+): Promise<void> {
+  console.log(`[S3] Restoring ${projectId} from S3 into container...`);
+  
+  const files = await listProjectFilesOnS3(projectId);
+  
+  if (files.length === 0) {
+    console.log(`[S3] No files found in S3 for ${projectId}, skipping restore`);
+    return;
+  }
+  
+  const tar = await import('tar-stream');
+  const pack = tar.pack();
+  
+  // Download all files and add to tar stream
+  for (const filePath of files) {
+    try {
+      const content = await downloadFileFromS3(projectId, filePath);
+      const buffer = Buffer.from(content);
+      
+      pack.entry({ name: filePath, size: buffer.length }, buffer);
+      console.log(`[S3] Added ${filePath} to restore archive`);
+    } catch (err: any) {
+      console.error(`[S3] Failed to download ${filePath}: ${err.message}`);
+    }
+  }
+  
+  pack.finalize();
+  
+  // Upload tar to container
+  await container.putArchive(pack, { path: containerPath });
+  console.log(`[S3] Restored ${files.length} files from S3 into container`);
+}

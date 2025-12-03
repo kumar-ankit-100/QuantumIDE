@@ -19,10 +19,12 @@ import {
   FolderTree,
   Search,
   Copy,
-  Check
+  Check,
+  Wand2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
+import CopilotChat from '@/components/editor/CopilotChat';
 
 interface Message {
   role: 'user' | 'assistant' | 'system';
@@ -52,9 +54,10 @@ interface ChatPanelProps {
   selectedLineRange?: string;
   previewUrl?: string;
   hostPort?: number | null;
+  onFileUpdate?: (filePath: string, newContent: string) => Promise<void>;
 }
 
-type TabType = 'preview' | 'chat';
+type TabType = 'preview' | 'chat' | 'copilot';
 
 // Code block component with copy functionality
 function CodeBlock({ code, language }: { code: string; language?: string }) {
@@ -67,7 +70,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   };
 
   return (
-    <div className="relative group my-3 rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900/50 w-full max-w-full">
+    <div className="relative group my-3 rounded-lg overflow-hidden border border-slate-700/50 bg-slate-900/50 w-full">
       {/* Header with language and copy button */}
       <div className="flex items-center justify-between px-4 py-2 bg-slate-800/80 border-b border-slate-700/50 sticky top-0 z-10">
         <span className="text-xs font-medium text-slate-400 uppercase tracking-wide">
@@ -91,10 +94,10 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         </button>
       </div>
       
-      {/* Code content - horizontally scrollable with custom scrollbar */}
-      <div className="overflow-x-auto overflow-y-auto max-h-[500px] w-full scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800/50">
-        <pre className="p-4 text-sm font-mono leading-relaxed w-max min-w-full">
-          <code className="text-slate-200">{code}</code>
+      {/* Code content - scrollable with visible scrollbar */}
+      <div className="overflow-x-auto overflow-y-auto max-h-[400px] bg-slate-950/50">
+        <pre className="p-4 text-sm font-mono leading-relaxed">
+          <code className="text-slate-200 break-all whitespace-pre-wrap">{code}</code>
         </pre>
       </div>
     </div>
@@ -257,9 +260,10 @@ export default function ChatPanel({
   selectedText,
   selectedLineRange,
   previewUrl,
-  hostPort 
+  hostPort,
+  onFileUpdate
 }: ChatPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabType>('preview');
+  const [activeTab, setActiveTab] = useState<TabType>('copilot'); // Default to copilot tab
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -565,8 +569,8 @@ export default function ChatPanel({
 
   return (
     <div className="h-full flex flex-col bg-gradient-to-br from-slate-900/80 via-slate-950/90 to-slate-900/80 backdrop-blur-sm rounded-lg overflow-hidden border border-slate-800/50 shadow-2xl transition-all duration-300 hover:border-purple-500/30">
-      {/* Tab Header */}
-      <div className="border-b border-slate-700/50 bg-gradient-to-r from-slate-800/60 to-slate-900/60 flex items-center">
+      {/* Tab Header - Fixed at top */}
+      <div className="flex-shrink-0 border-b border-slate-700/50 bg-gradient-to-r from-slate-800/60 to-slate-900/60 flex items-center sticky top-0 z-50">
         <button
           onClick={() => setActiveTab('preview')}
           className={cn(
@@ -586,6 +590,20 @@ export default function ChatPanel({
         </button>
         
         <button
+          onClick={() => setActiveTab('copilot')}
+          className={cn(
+            'flex-1 px-4 py-3 flex items-center justify-center gap-2 transition-all duration-200 border-b-2',
+            activeTab === 'copilot'
+              ? 'border-purple-500 bg-slate-800/50 text-purple-300'
+              : 'border-transparent text-slate-400 hover:text-slate-300 hover:bg-slate-800/30'
+          )}
+        >
+          <Wand2 className="w-4 h-4" />
+          <span className="text-sm font-medium">AI Copilot</span>
+          <Sparkles className="w-3 h-3 text-yellow-400 animate-pulse" />
+        </button>
+
+        <button
           onClick={() => setActiveTab('chat')}
           className={cn(
             'flex-1 px-4 py-3 flex items-center justify-center gap-2 transition-all duration-200 border-b-2',
@@ -596,7 +614,6 @@ export default function ChatPanel({
         >
           <MessageSquare className="w-4 h-4" />
           <span className="text-sm font-medium">AI Chat</span>
-          <Sparkles className="w-3 h-3 text-yellow-400 animate-pulse" />
         </button>
       </div>
 
@@ -650,6 +667,18 @@ export default function ChatPanel({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* AI Copilot Tab - NEW! */}
+      {activeTab === 'copilot' && (
+        <div className="flex-1 overflow-hidden min-h-0">
+          <CopilotChat
+            projectId={projectId}
+            currentFile={currentFile}
+            fileContent={fileContent}
+            onFileUpdate={onFileUpdate}
+          />
         </div>
       )}
 

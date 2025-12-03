@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Editor from '@monaco-editor/react';
 import dynamic from 'next/dynamic';
 import { 
@@ -15,12 +15,15 @@ import {
   FolderOpen,
   Code2,
   Code,
-  Save
+  Save,
+  Home,
+  Play
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import ChatPanel from './ChatPanel';
+import { ProjectLoading } from '@/components/editor/ProjectLoading';
 
 // Define the props type
 interface MultiTerminalProps {
@@ -49,6 +52,7 @@ interface FileNode {
 
 export default function IDEPage() {
   const params = useParams();
+  const router = useRouter();
   const projectId = params.id as string;
   
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -60,6 +64,8 @@ export default function IDEPage() {
   const [loading, setLoading] = useState(true);
   const [selectedText, setSelectedText] = useState<string>('');
   const [selectedLineRange, setSelectedLineRange] = useState<string>('');
+  const [isStartingServer, setIsStartingServer] = useState(false);
+  const [serverStarted, setServerStarted] = useState(false);
 
   // Load file tree
   useEffect(() => {
@@ -93,6 +99,7 @@ export default function IDEPage() {
         console.log(`Updating preview URL to: ${data.previewUrl}`);
         setPreviewUrl(data.previewUrl);
         setHostPort(data.hostPort);
+        setServerStarted(true);
       } else {
         console.log('No preview URL available:', data.error || 'No port found');
         setPreviewUrl('');
@@ -103,6 +110,39 @@ export default function IDEPage() {
       setPreviewUrl('');
       setHostPort(null);
     }
+  };
+
+  const startDevServer = async () => {
+    setIsStartingServer(true);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/start`, {
+        method: 'POST',
+      });
+      
+      if (res.ok) {
+        // Poll for port after starting
+        let attempts = 0;
+        const pollInterval = setInterval(async () => {
+          await loadPreviewUrl();
+          attempts++;
+          if (previewUrl || attempts > 30) {
+            clearInterval(pollInterval);
+            setIsStartingServer(false);
+          }
+        }, 1000);
+      }
+    } catch (err) {
+      console.error('Failed to start dev server:', err);
+      setIsStartingServer(false);
+    }
+  };
+
+  const goHome = async () => {
+    // Auto-save before going home
+    if (selectedFile && fileContent) {
+      await saveFile();
+    }
+    router.push('/');
   };
 
   const loadFileTree = async () => {
@@ -154,6 +194,31 @@ export default function IDEPage() {
       });
     } catch (err) {
       console.error('Failed to save file:', err);
+    }
+  };
+
+  // Handler for AI Copilot file updates
+  const handleFileUpdate = async (filePath: string, newContent: string) => {
+    try {
+      await fetch(`/api/projects/${projectId}/files/write`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          filePath, 
+          content: newContent 
+        }),
+      });
+      
+      // If updating the currently open file, refresh it
+      if (filePath === selectedFile) {
+        setFileContent(newContent);
+      }
+      
+      // Optionally reload file tree to show any new files
+      await loadFileTree();
+    } catch (err) {
+      console.error('Failed to update file:', err);
+      throw err; // Re-throw so CopilotChat can handle the error
     }
   };
 
@@ -230,12 +295,25 @@ export default function IDEPage() {
     });
   };
 
+  // Show loading screen while files are loading
+  if (loading) {
+    return <ProjectLoading status="installing" message="Setting up your workspace..." />;
+  }
+
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
       {/* Header with gradient */}
       <div className="border-b border-slate-800/50 bg-gradient-to-r from-slate-900/90 via-slate-800/90 to-slate-900/90 backdrop-blur-sm">
         <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={goHome}
+              className="hover:bg-slate-800/50 transition-all duration-200"
+            >
+              <Home className="w-5 h-5 text-slate-400 hover:text-blue-400 transition-colors" />
+            </Button>
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center animate-pulse">
               <Code2 className="w-5 h-5 text-white" />
             </div>
@@ -244,12 +322,33 @@ export default function IDEPage() {
             </h1>
           </div>
           <div className="flex gap-2">
+            {!serverStarted && (
+              <Button 
+                size="sm" 
+                onClick={startDevServer}
+                disabled={isStartingServer}
+                className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white border-0 transition-all duration-300 hover:scale-105"
+              >
+                {isStartingServer ? (
+                  <>
+                    <Code2 className="w-4 h-4 mr-2 animate-spin" />
+                    Starting...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 mr-2" />
+                    Start Server
+                  </>
+                )}
+              </Button>
+            )}
             <Button 
               size="sm" 
               onClick={saveFile} 
               disabled={!selectedFile}
               className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white border-0 transition-all duration-300 hover:scale-105"
             >
+              <Save className="w-4 h-4 mr-2" />
               Save
             </Button>
           </div>
@@ -371,6 +470,7 @@ export default function IDEPage() {
             selectedLineRange={selectedLineRange}
             previewUrl={previewUrl}
             hostPort={hostPort}
+            onFileUpdate={handleFileUpdate}
           />
         </ResizablePanel>
       </ResizablePanelGroup>

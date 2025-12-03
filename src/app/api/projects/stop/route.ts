@@ -17,11 +17,20 @@ export async function POST(req: NextRequest) {
 const container = docker.getContainer(devContainerName);
 console.log(`Stopping container with name: ${devContainerName} and conainer id: ${container}`);
 
+    // Commit changes before stopping
+    try {
+      const { commitChanges } = await import("@/lib/github");
+      await commitChanges(container, "Auto-save on stop");
+      console.log(`[Git] Changes committed before stop`);
+    } catch (err: any) {
+      console.warn(`[Git] Commit failed: ${err.message}`);
+    }
+
     // Stop the container
     await container.stop();
     return NextResponse.json({ 
       success: true, 
-      message: "Development server stopped" 
+      message: "Development server stopped (changes committed locally)" 
     });
   } catch (err: any) {
     console.error(`Failed to stop server: ${err.message}`);

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Docker from 'dockerode';
+import path from 'path';
+import fs from 'fs-extra';
 
 const docker = new Docker();
+const PROJECTS_DIR = path.join(process.cwd(), "projects");
 
 interface RouteParams {
   params: Promise<{
@@ -15,7 +18,37 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
-    const { command } = await request.json();
+    let { command } = await request.json();
+
+    // Try to read project metadata to get the correct dev command
+    const projectFolder = path.join(PROJECTS_DIR, id);
+    const metadataPath = path.join(projectFolder, "metadata.json");
+    
+    let serverType = "vite"; // default
+    
+    if (!command && await fs.pathExists(metadataPath)) {
+      try {
+        const metadata = await fs.readJSON(metadataPath);
+        serverType = metadata.serverConfig?.type || "vite";
+        
+        if (metadata.serverConfig?.devCommand) {
+          command = metadata.serverConfig.devCommand;
+          console.log(`Using dev command from metadata: ${command}`);
+        }
+      } catch (err) {
+        console.warn('Failed to read metadata, using default command');
+      }
+    }
+
+    // Default to npm run dev if no command specified
+    // Next.js already has -H 0.0.0.0 in package.json, don't add --host
+    if (!command) {
+      if (serverType === "nextjs") {
+        command = "npm run dev";
+      } else {
+        command = "npm run dev -- --host 0.0.0.0";
+      }
+    }
 
     console.log(`Starting background process in container ${id}: ${command}`);
 
@@ -40,7 +73,8 @@ export async function POST(
     return NextResponse.json({ 
       success: true,
       message: 'Background process started',
-      logFile: '/tmp/dev-server.log'
+      logFile: '/tmp/dev-server.log',
+      command
     });
   } catch (error) {
     console.error('Error starting background process:', error);

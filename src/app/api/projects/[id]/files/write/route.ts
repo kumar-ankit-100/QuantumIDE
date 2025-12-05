@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Docker from "dockerode";
-import { writeFileToContainer } from "@/lib/containerManager";
+import { writeFileToContainer } from "@/lib/containerFileHelpers";
 
 const docker = new Docker();
 
@@ -19,8 +19,8 @@ export async function POST(
       );
     }
 
-    const container = docker.getContainer(projectId);
-    await writeFileToContainer(container, filePath, content);
+    // Use the base64-based write function which handles special characters properly
+    await writeFileToContainer(projectId, filePath, content);
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

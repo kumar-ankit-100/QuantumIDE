@@ -19,6 +19,12 @@ export async function POST(
     // Get current working directory for this project (default to /app)
     let currentDir = projectWorkingDirs.get(projectId) || "/app";
     
+    // Ensure currentDir is always an absolute path
+    if (!currentDir.startsWith('/')) {
+      currentDir = '/app';
+      projectWorkingDirs.set(projectId, currentDir);
+    }
+    
     // Check if command is a cd command
     const cdMatch = command.match(/^\s*cd\s+(.+?)\s*$/);
     if (cdMatch) {
@@ -72,11 +78,13 @@ export async function POST(
       });
       
       if (checkOutput.includes("exists")) {
+        // Ensure newDir is an absolute path
+        const absoluteDir = newDir.startsWith('/') ? newDir : `/app/${newDir}`;
         // Update working directory
-        projectWorkingDirs.set(projectId, newDir);
+        projectWorkingDirs.set(projectId, absoluteDir);
         return NextResponse.json({ 
-          output: `\x1b[32m✓\x1b[0m Changed to: \x1b[36m${newDir}\x1b[0m\r\n`,
-          workingDir: newDir 
+          output: `\x1b[32m✓\x1b[0m Changed to: \x1b[36m${absoluteDir}\x1b[0m\r\n`,
+          workingDir: absoluteDir 
         });
       } else {
         return NextResponse.json({ 
@@ -86,15 +94,13 @@ export async function POST(
       }
     }
     
-    // Execute command in current working directory with pwd prepended
-    const fullCommand = `cd "${currentDir}" && ${command} && echo -e "\\n\\x1b[2m[pwd: $(pwd)]\\x1b[0m"`;
-    
+    // Execute command in current working directory
     const exec = await container.exec({
       AttachStdin: true,
       AttachStdout: true,
       AttachStderr: true,
       Tty: true,
-      Cmd: ["/bin/bash", "-c", fullCommand],
+      Cmd: ["/bin/bash", "-c", command],
       Env: ["TERM=xterm-256color"],
       WorkingDir: currentDir,
     });
@@ -114,7 +120,7 @@ export async function POST(
 
     return NextResponse.json({ 
       output,
-      workingDir: currentDir 
+      workingDir: currentDir
     });
   } catch (err: any) {
     console.error(`Failed to execute command: ${err.message}`);

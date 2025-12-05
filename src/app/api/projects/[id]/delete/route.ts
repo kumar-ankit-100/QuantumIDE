@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import Docker from "dockerode";
 import fs from "fs-extra";
 import path from "path";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/options";
+import { PrismaClient } from "@/generated/prisma/client";
+import { Octokit } from "@octokit/rest";
 
 const docker = new Docker();
 const PROJECTS_DIR = path.join(process.cwd(), "projects");
+const prisma = new PrismaClient();
 
 export async function DELETE(
   req: NextRequest,
@@ -14,6 +19,26 @@ export async function DELETE(
     const { id: projectId } = await params;
     
     console.log(`[DELETE] Deleting project: ${projectId}`);
+    
+    // Get session and verify authentication
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    
+    // Get project from database
+    const project = await prisma.project.findUnique({
+      where: { id: projectId }
+    });
+    
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    
+    // Verify user owns the project
+    if (project.userId !== session.user.id) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
     
     // 1. Stop and remove the container
     try {
@@ -56,9 +81,48 @@ export async function DELETE(
       console.log(`[DELETE] Project folder not found: ${projectFolder}`);
     }
     
+    // 3. Delete GitHub repository
+    if (project.githubRepo) {
+      try {
+        const githubToken = process.env.GITHUB_TOKEN;
+        if (githubToken) {
+          const octokit = new Octokit({ auth: githubToken });
+          
+          // Extract owner and repo from URL
+          // Format: https://github.com/owner/repo.git
+          const repoMatch = project.githubRepo.match(/github\.com[/:]([^/]+)\/(.+?)(\.git)?$/);
+          
+          if (repoMatch) {
+            const [, owner, repo] = repoMatch;
+            console.log(`[DELETE] Deleting GitHub repository: ${owner}/${repo}`);
+            
+            await octokit.repos.delete({
+              owner,
+              repo: repo.replace('.git', '')
+            });
+            
+            console.log(`[DELETE] GitHub repository deleted successfully`);
+          } else {
+            console.log(`[DELETE] Could not parse GitHub repo URL: ${project.githubRepo}`);
+          }
+        } else {
+          console.log(`[DELETE] No GitHub token found, skipping repository deletion`);
+        }
+      } catch (err: any) {
+        console.error(`[DELETE] Error deleting GitHub repository: ${err.message}`);
+        // Continue even if GitHub deletion fails
+      }
+    }
+    
+    // 4. Delete from database
+    await prisma.project.delete({
+      where: { id: projectId }
+    });
+    console.log(`[DELETE] Project deleted from database`);
+    
     return NextResponse.json({ 
       success: true, 
-      message: "Project and container deleted successfully" 
+      message: "Project deleted successfully from database, container, and GitHub" 
     });
   } catch (err: any) {
     console.error(`[DELETE] Failed to delete project: ${err.message}`);

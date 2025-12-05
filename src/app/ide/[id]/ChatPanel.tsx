@@ -401,6 +401,14 @@ export default function ChatPanel({
     }
   };
 
+  // Auto-switch to preview tab when preview URL becomes available
+  useEffect(() => {
+    if (previewUrl && activeTab !== 'preview') {
+      console.log('Auto-switching to preview tab, URL:', previewUrl);
+      setActiveTab('preview');
+    }
+  }, [previewUrl]);
+
   // Auto-add selected text as context when it changes
   useEffect(() => {
     if (selectedText && selectedText.trim()) {
@@ -651,16 +659,17 @@ export default function ChatPanel({
               <div className="flex flex-col items-center justify-center h-full bg-gradient-to-br from-slate-900/50 to-slate-950/50 p-8 text-center">
                 <div className="space-y-4 max-w-md p-8 rounded-xl bg-gradient-to-br from-slate-800/30 to-slate-900/30 backdrop-blur-sm border border-slate-700/30">
                   <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-purple-500/20 to-pink-500/20 flex items-center justify-center">
-                    <RefreshCw className="w-8 h-8 text-purple-400 animate-spin-slow" />
+                    <RefreshCw className="w-8 h-8 text-purple-400 animate-spin" />
                   </div>
-                  <p className="mb-4 font-medium text-lg text-slate-300">Preview Not Available</p>
+                  <p className="mb-4 font-medium text-lg text-slate-300">Starting Dev Server...</p>
                   <div className="space-y-3 text-sm">
-                    <p className="font-medium text-slate-400">Start the dev server with:</p>
-                    <code className="block bg-slate-950/80 px-4 py-3 rounded-lg text-left font-mono text-green-400 border border-slate-700/50">
-                      npm run dev
-                    </code>
+                    <p className="font-medium text-slate-400">Waiting for server to start</p>
+                    <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
+                      <div className="w-2 h-2 rounded-full bg-purple-500 animate-pulse"></div>
+                      <span>This may take up to 30 seconds</span>
+                    </div>
                     <p className="text-xs text-slate-500 mt-4">
-                      The <code className="text-purple-400">--host 0.0.0.0</code> flag will be added automatically
+                      Run <code className="text-green-400 bg-slate-950/80 px-2 py-1 rounded">npm run dev</code> in the terminal if not started
                     </p>
                   </div>
                 </div>

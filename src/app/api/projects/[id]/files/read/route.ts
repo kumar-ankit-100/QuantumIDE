@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Docker from "dockerode";
-import { readFileFromContainer } from "@/lib/containerManager";
+import { readFileFromContainer } from "@/lib/containerFileHelpers";
 
 const docker = new Docker();
 

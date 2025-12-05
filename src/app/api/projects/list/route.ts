@@ -1,70 +1,85 @@
 import { NextResponse } from "next/server";
-import path from "path";
-import fs from "fs-extra";
-import { getContainerStatus } from "@/lib/containerManager";
+import { withErrorHandler } from "@/middleware/withErrorHandler";
+import { logger } from "@/lib/logger";
+import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/options";
+import Docker from 'dockerode';
 
-const PROJECTS_DIR = path.join(process.cwd(), "projects");
+const docker = new Docker();
 
-export async function GET() {
+async function listProjectsHandler(request: Request) {
   try {
-    // Check if projects directory exists
-    if (!await fs.pathExists(PROJECTS_DIR)) {
-      return NextResponse.json({ projects: [] });
+    // Get authenticated user from session
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: 'Unauthorized - Please login' },
+        { status: 401 }
+      );
     }
 
-    const projectDirs = await fs.readdir(PROJECTS_DIR);
-    const projects = [];
+    const userId = (session.user as any).id;
 
-    for (const projectId of projectDirs) {
-      const projectFolder = path.join(PROJECTS_DIR, projectId);
-      const metadataPath = path.join(projectFolder, "metadata.json");
-      
-      try {
-        if (await fs.pathExists(metadataPath)) {
-          const metadata = await fs.readJSON(metadataPath);
-          
-          // Get container status
-          const containerStatus = await getContainerStatus(projectId);
-          const status = containerStatus === "running" ? "running" : 
-                        containerStatus === "exited" ? "stopped" : "error";
+    logger.info('Fetching projects for user', { userId });
 
-          projects.push({
-            id: projectId,
-            name: metadata.name || `Project ${projectId.slice(0, 8)}`,
-            description: metadata.description || "No description",
-            techStack: metadata.techStack || ["React", "Vite"],
-            template: metadata.template || "react-vite",
-            createdAt: metadata.createdAt,
-            lastModified: metadata.lastModified,
-            status,
-            containerPort: 5173 // Default port, could be dynamic
-          });
+    // Get projects from database
+    const projects = await prisma.project.findMany({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        description: true,
+        template: true,
+        githubRepo: true,
+        containerId: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    // Check container status for each project
+    const projectsWithStatus = await Promise.all(
+      projects.map(async (project) => {
+        let status = 'stopped';
+        
+        if (project.containerId) {
+          try {
+            const container = docker.getContainer(project.containerId);
+            const info = await container.inspect();
+            status = info.State.Status === 'running' ? 'running' : 'stopped';
+          } catch (err) {
+            status = 'stopped';
+          }
         }
-      } catch (err) {
-        console.error(`Failed to read metadata for project ${projectId}:`, err);
-        // Add project with minimal info if metadata is corrupted
-        projects.push({
-          id: projectId,
-          name: `Project ${projectId.slice(0, 8)}`,
-          description: "No description",
-          techStack: ["Unknown"],
-          template: "unknown",
-          createdAt: new Date().toISOString(),
-          lastModified: new Date().toISOString(),
-          status: "error"
-        });
-      }
-    }
 
-    // Sort by last modified (newest first)
-    projects.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
+        return {
+          id: project.id,
+          name: project.name,
+          description: project.description || 'No description',
+          template: project.template,
+          githubRepo: project.githubRepo,
+          containerId: project.containerId,
+          createdAt: project.createdAt.toISOString(),
+          lastModified: project.updatedAt.toISOString(),
+          status,
+        };
+      })
+    );
 
-    return NextResponse.json({ projects });
+    return NextResponse.json({
+      success: true,
+      projects: projectsWithStatus,
+      count: projectsWithStatus.length,
+    });
   } catch (err: any) {
-    console.error("Failed to list projects:", err);
+    logger.error('Failed to list projects', err);
     return NextResponse.json(
       { error: `Failed to list projects: ${err.message}` },
       { status: 500 }
     );
   }
 }
+
+export const GET = withErrorHandler(listProjectsHandler);

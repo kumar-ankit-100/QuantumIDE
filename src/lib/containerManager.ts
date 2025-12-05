@@ -140,10 +140,12 @@ export async function startDevServer(
   if (serverType === "nextjs") {
     console.log(`[${new Date().toISOString()}] Running: npm run dev (Next.js) inside container...`);
     // Next.js dev command is already configured with -H 0.0.0.0 in package.json
-    devCommand = ["npm", "run", "dev"];
+    // Redirect output to log file for port detection
+    devCommand = ["bash", "-c", "npm run dev > /tmp/dev-server.log 2>&1 &"];
   } else {
     console.log(`[${new Date().toISOString()}] Running: npm run dev (Vite) inside container...`);
-    devCommand = ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", port.toString()];
+    // Redirect output to log file for port detection
+    devCommand = ["bash", "-c", `npm run dev -- --host 0.0.0.0 --port ${port} > /tmp/dev-server.log 2>&1 &`];
   }
 
   const exec = await container.exec({
@@ -153,11 +155,11 @@ export async function startDevServer(
     WorkingDir: "/app",
   });
 
-  // Start and attach output (optional but useful for logs)
+  // Start the command
   const stream = await exec.start({ Tty: false });
-  if (stream) {
-    container.modem.demuxStream(stream, process.stdout, process.stderr);
-  }
+  
+  // Wait a moment for the server to start writing to the log
+  await new Promise(resolve => setTimeout(resolve, 2000));
 
   console.log(`[${new Date().toISOString()}] Dev server started on host port ${hostPort}`);
 
@@ -183,27 +185,24 @@ export async function createViteProject(container: Docker.Container): Promise<vo
   
   // Install Vite and React dependencies
   console.log(`[${new Date().toISOString()}] Installing Vite dependencies...`);
+  
+  // Add dependencies to package.json first
   await execCommand(
     container,
-    [
-      "npm", "install",
-      "vite@latest",
-      "react@latest",
-      "react-dom@latest",
-      "@vitejs/plugin-react@latest"
-    ],
-    "/app",
-    PROJECT_INIT_TIMEOUT
+    ["bash", "-c", "npm pkg set dependencies.vite='latest' dependencies.react='latest' dependencies.react-dom='latest' dependencies.'@vitejs/plugin-react'='latest'"],
+    "/app"
   );
-
-  // Install dev dependencies
+  
   await execCommand(
     container,
-    [
-      "npm", "install", "--save-dev",
-      "@types/react@latest",
-      "@types/react-dom@latest"
-    ],
+    ["bash", "-c", "npm pkg set devDependencies.'@types/react'='latest' devDependencies.'@types/react-dom'='latest'"],
+    "/app"
+  );
+  
+  // Now install all dependencies
+  await execCommand(
+    container,
+    ["npm", "install"],
     "/app",
     PROJECT_INIT_TIMEOUT
   );
@@ -415,22 +414,24 @@ export async function createNextJSProject(container: Docker.Container): Promise<
   
   // Install Next.js and dependencies directly (faster than create-next-app)
   console.log(`[${new Date().toISOString()}] Installing Next.js dependencies...`);
+  
+  // First, ensure package.json has the dependencies field
   await execCommand(
     container,
-    [
-      "npm", "install", 
-      "next@latest", 
-      "react@latest", 
-      "react-dom@latest",
-      "typescript",
-      "@types/react",
-      "@types/node",
-      "tailwindcss",
-      "postcss",
-      "autoprefixer",
-      "eslint",
-      "eslint-config-next"
-    ],
+    ["bash", "-c", "npm pkg set dependencies.next='latest' dependencies.react='latest' dependencies.react-dom='latest'"],
+    "/app"
+  );
+  
+  await execCommand(
+    container,
+    ["bash", "-c", "npm pkg set devDependencies.typescript='latest' devDependencies.'@types/react'='latest' devDependencies.'@types/node'='latest' devDependencies.tailwindcss='latest' devDependencies.postcss='latest' devDependencies.autoprefixer='latest' devDependencies.eslint='latest' devDependencies.eslint-config-next='latest'"],
+    "/app"
+  );
+  
+  // Now install
+  await execCommand(
+    container,
+    ["npm", "install"],
     "/app",
     PROJECT_INIT_TIMEOUT
   );
@@ -964,34 +965,38 @@ export async function getContainerFileTree(
   directory: string = "/app"
 ): Promise<any> {
   try {
-    // Use find to get recursive file listing with type
+    // Use find with -printf to get file type (d=directory, f=file)
     const output = await execCommand(
       container,
-      ["find", directory, "-maxdepth", "3", "-type", "f", "-o", "-type", "d"],
+      ["find", directory, "-maxdepth", "3", "-not", "-path", "*/node_modules/*", "-printf", "%y %p\\n"],
       directory
     );
     
-    const lines = output.split("\n").filter(line => line.trim().length > 0);
+    const lines = output.trim().split("\n").filter(line => line.trim().length > 0);
     const rootNode: any = { name: "app", type: "directory", path: "/app", children: [] };
     
     // Build file tree structure
     const pathMap = new Map<string, any>();
     pathMap.set(directory, rootNode);
     
-    for (const fullPath of lines) {
+    for (const line of lines) {
+      // Parse line format: "d /app/src" or "f /app/index.js"
+      const match = line.match(/^([df])\s+(.+)$/);
+      if (!match) continue;
+      
+      const [, fileType, fullPath] = match;
       if (fullPath === directory) continue;
       
       const relativePath = fullPath.replace(directory + "/", "");
       const parts = relativePath.split("/");
       const fileName = parts[parts.length - 1];
       
-      // Skip node_modules and hidden files
-      if (relativePath.includes("node_modules") || fileName.startsWith(".")) {
+      // Skip hidden files (but allow root .quantumide files)
+      if (fileName.startsWith(".") && !fullPath.startsWith(directory + "/.quantumide")) {
         continue;
       }
       
-      // Determine if it's a directory by checking if it has children in the list
-      const isDirectory = lines.some(p => p.startsWith(fullPath + "/"));
+      const isDirectory = fileType === "d";
       
       const node: any = {
         name: fileName,

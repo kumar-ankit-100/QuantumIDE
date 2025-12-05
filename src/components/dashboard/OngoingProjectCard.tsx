@@ -27,10 +27,26 @@ interface OngoingProjectCardProps {
   project: OngoingProject;
   onOpenProject: (projectId: string) => void;
   onDeleteProject?: (projectId: string) => void;
+  onResumeProject?: (projectId: string) => void;
 }
 
-export function OngoingProjectCard({ project, onOpenProject, onDeleteProject }: OngoingProjectCardProps) {
+export function OngoingProjectCard({ project, onOpenProject, onDeleteProject, onResumeProject }: OngoingProjectCardProps) {
   const [isHovered, setIsHovered] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
+
+  const handleOpen = async () => {
+    // If project is stopped, resume it first
+    if (project.status === 'stopped' && onResumeProject) {
+      setIsResuming(true);
+      try {
+        await onResumeProject(project.id);
+      } finally {
+        setIsResuming(false);
+      }
+    } else {
+      onOpenProject(project.id);
+    }
+  };
 
   const statusColors = {
     running: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
@@ -132,12 +148,13 @@ export function OngoingProjectCard({ project, onOpenProject, onDeleteProject }: 
         </div>
 
         <Button
-          onClick={() => onOpenProject(project.id)}
+          onClick={handleOpen}
           className="w-full group-hover:scale-105 transition-transform duration-200"
           size="sm"
+          disabled={isResuming}
         >
           <Play className="w-4 h-4 mr-2" />
-          Open Project
+          {isResuming ? 'Resuming...' : project.status === 'stopped' ? 'Resume Project' : 'Open Project'}
         </Button>
       </CardContent>
     </Card>

@@ -71,6 +71,10 @@ export async function commitChanges(
   console.log(`[Git] Committing changes: ${message}`);
   
   try {
+    // Configure git user (required for commits)
+    await execCommand(container, ["git", "config", "user.name", "QuantumIDE"], "/app");
+    await execCommand(container, ["git", "config", "user.email", "ide@quantumide.dev"], "/app");
+    
     // Add all changes
     await execCommand(container, ["git", "add", "."], "/app");
     

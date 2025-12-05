@@ -210,7 +210,7 @@ export function ProjectCreationModal({
                   Create GitHub Repository
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  Automatically create a GitHub repo and push your project. Auto-save will commit changes every 30 seconds.
+                  Automatically create a GitHub repo and push your project. Click 'Save to GitHub' button to commit and push changes.
                 </p>
               </div>
             </div>

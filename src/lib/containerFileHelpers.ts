@@ -105,7 +105,21 @@ export async function readFileFromContainer(
       ["cat", filePath],
       "/app"
     );
-    return content;
+    // Aggressively strip all BOM and corruption characters
+    // This handles: UTF-8 BOM, UTF-16 BOM, UTF-32 BOM, replacement character, and other artifacts
+    let cleaned = content;
+    
+    // Strip UTF-8 BOM (EF BB BF)
+    if (cleaned.charCodeAt(0) === 0xFEFF || cleaned.charCodeAt(0) === 0xEFBBBF) {
+      cleaned = cleaned.substring(1);
+    }
+    
+    // Strip any leading non-printable or corruption characters
+    // Match: BOM variants, replacement character (�), Q, }, ), and any other weird leading chars
+    cleaned = cleaned.replace(/^[\uFEFF\uFFFE\uFFFD\uEF\uBB\uBF\x00-\x1F\x7F]+/, '');
+    cleaned = cleaned.replace(/^[Q}\)�]+/, '');
+    
+    return cleaned;
   } catch (err: any) {
     if (err.message.includes("No such file")) {
       throw new Error(`File not found: ${filePath}`);

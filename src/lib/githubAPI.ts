@@ -22,6 +22,9 @@ export interface GitHubRepo {
 export async function createGitHubRepo(options: CreateRepoOptions): Promise<GitHubRepo> {
   const octokit = new Octokit({
     auth: options.token,
+    request: {
+      timeout: 30000, // 30 seconds timeout (increased from default 10s)
+    },
   });
 
   try {
@@ -53,6 +56,9 @@ export async function createGitHubRepo(options: CreateRepoOptions): Promise<GitH
 export async function validateGitHubToken(token: string): Promise<boolean> {
   const octokit = new Octokit({
     auth: token,
+    request: {
+      timeout: 30000, // 30 seconds timeout
+    },
   });
 
   try {
@@ -69,6 +75,9 @@ export async function validateGitHubToken(token: string): Promise<boolean> {
 export async function getGitHubUser(token: string) {
   const octokit = new Octokit({
     auth: token,
+    request: {
+      timeout: 30000, // 30 seconds timeout
+    },
   });
 
   try {

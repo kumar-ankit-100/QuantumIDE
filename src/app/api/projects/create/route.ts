@@ -18,6 +18,9 @@ import { withErrorHandler } from "@/middleware/withErrorHandler";
 import { withRateLimit } from "@/middleware/withRateLimit";
 import { logger } from "@/lib/logger";
 import { timeAsync } from "@/lib/metrics";
+import { prisma } from "@/lib/prisma";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/options";
 
 const PROJECTS_DIR = path.join(process.cwd(), "projects");
 
@@ -27,13 +30,24 @@ async function createProjectHandler(request: Request) {
   let projectName = "";
 
   try {
+    // Get authenticated user from session
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: "Unauthorized - Please login" },
+        { status: 401 }
+      );
+    }
+
+    const userId = (session.user as any).id;
+
     // Parse request body for project configuration
     const body = await request.json().catch(() => ({}));
     const { 
       template = "react-vite", 
       name = "", 
       description = "", 
-      techStack = [] 
+      techStack = []
     } = body;
 
     projectName = name;
@@ -108,9 +122,9 @@ async function createProjectHandler(request: Request) {
       await initGitInContainer(container, projectId);
       console.log(`[Git] Repository initialized`);
       
-      // Auto-create GitHub repo if requested and token available
-      const githubToken = process.env.GITHUB_TOKEN || body.githubToken;
-      if (githubToken && body.createGithubRepo) {
+      // Always create GitHub repo with token from environment
+      const githubToken = process.env.GITHUB_TOKEN;
+      if (githubToken) {
         try {
           const { createGitHubRepo } = await import("@/lib/githubAPI");
           const repo = await createGitHubRepo({
@@ -125,7 +139,8 @@ async function createProjectHandler(request: Request) {
           // Push initial commit to GitHub
           await pushToGitHub(
             container,
-            repo.cloneUrl.replace('https://', `https://${githubToken}@`),
+            repo.cloneUrl,
+            'main',
             githubToken
           );
           
@@ -144,6 +159,24 @@ async function createProjectHandler(request: Request) {
       }
     } catch (err: any) {
       console.warn(`[Git] Init failed: ${err.message}`);
+    }
+
+    // Save project to database
+    try {
+      await prisma.project.create({
+        data: {
+          id: projectId,
+          name: projectMetadata.name,
+          description: projectMetadata.description,
+          template,
+          githubRepo: projectMetadata.githubRepo,
+          containerId: container.id,
+          userId,
+        },
+      });
+      console.log(`[Database] Project saved for user ${userId}`);
+    } catch (dbErr: any) {
+      console.warn(`[Database] Failed to save project: ${dbErr.message}`);
     }
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);

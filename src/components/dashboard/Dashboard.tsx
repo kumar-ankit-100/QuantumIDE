@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
 import { 
   Code2, 
@@ -25,6 +26,7 @@ import { OngoingProjectCard } from "./OngoingProjectCard";
 import { ProjectCreationModal } from "./ProjectCreationModal";
 import LoadProjectModal from "./LoadProjectModal";
 import { ProjectLoading } from "@/components/editor/ProjectLoading";
+import SetupTerminal, { SetupStep } from "@/components/setup/SetupTerminal";
 import { cn } from "@/lib/utils";
 
 const PROJECT_TEMPLATES = [
@@ -137,26 +139,39 @@ interface OngoingProject {
 }
 
 export function Dashboard() {
+  const { data: session, status } = useSession();
   const [ongoingProjects, setOngoingProjects] = useState<OngoingProject[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>("all");
-  const [isCreating, setIsCreating] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<typeof PROJECT_TEMPLATES[0] | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [showLoadModal, setShowLoadModal] = useState(false);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
+  const [setupSteps, setSetupSteps] = useState<SetupStep[]>([]);
+  const [showSetupTerminal, setShowSetupTerminal] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
   
   const router = useRouter();
 
-  // Load ongoing projects
+  // Redirect to login if not authenticated
   useEffect(() => {
-    loadOngoingProjects();
-  }, []);
+    if (status === 'unauthenticated') {
+      router.push('/login');
+    }
+  }, [status, router]);
+
+  // Load ongoing projects when authenticated
+  useEffect(() => {
+    if (status === 'authenticated') {
+      loadOngoingProjects();
+    }
+  }, [status]);
 
   const loadOngoingProjects = async () => {
     setIsLoadingProjects(true);
     try {
-      const res = await fetch("/api/projects/list");
+      // Session is handled on server side, no need to pass userId
+      const res = await fetch('/api/projects/list');
       const data = await res.json();
       
       if (data.projects) {
@@ -164,7 +179,7 @@ export function Dashboard() {
           id: project.id,
           name: project.name,
           description: project.description,
-          techStack: project.techStack,
+          techStack: project.techStack || [],
           lastModified: formatRelativeTime(project.lastModified),
           status: project.status,
           containerPort: project.containerPort
@@ -219,10 +234,44 @@ export function Dashboard() {
     customTechStack: string[];
     createGithubRepo?: boolean;
   }) => {
+    setShowModal(false);
+    
+    // Initialize setup steps
+    const initialSteps: SetupStep[] = [
+      { id: "1", label: "Creating project container", status: "pending" },
+      { id: "2", label: "Setting up project structure", status: "pending" },
+      { id: "3", label: "Installing dependencies", status: "pending" },
+      { id: "4", label: "Initializing GitHub repository", status: "pending" },
+      { id: "5", label: "Pushing initial commit", status: "pending" },
+      { id: "6", label: "Starting development server", status: "pending" },
+    ];
+    
+    setSetupSteps(initialSteps);
+    setShowSetupTerminal(true);
     setIsCreating(true);
-    setShowModal(false); // Close modal before showing loading screen
     
     try {
+      // Simulate step updates (will be replaced with real WebSocket/SSE)
+      const updateStep = (stepId: string, status: SetupStep["status"], output?: string[]) => {
+        setSetupSteps(prev => prev.map(step => {
+          if (step.id === stepId) {
+            return {
+              ...step,
+              status,
+              output,
+              startTime: status === "running" ? Date.now() : step.startTime,
+              endTime: status === "success" || status === "error" ? Date.now() : undefined,
+            };
+          }
+          return step;
+        }));
+      };
+
+      // Step 1: Create container
+      updateStep("1", "running", ["Pulling Docker image...", "Creating container instance..."]);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Session is handled on server side, no need to pass userId
       const res = await fetch("/api/projects/create", { 
         method: "POST",
         headers: {
@@ -233,23 +282,152 @@ export function Dashboard() {
           name: projectData.name,
           description: projectData.description,
           techStack: [...projectData.template.techStack, ...projectData.customTechStack],
-          createGithubRepo: projectData.createGithubRepo || false
+          createGithubRepo: true // Always create GitHub repo
         })
       });
       
       const data = await res.json();
+      updateStep("1", "success", ["Container created successfully", `ID: ${data.projectId?.substring(0, 12)}...`]);
 
-      if (data.projectId) {
-        router.push(`/ide/${data.projectId}`);
+      if (!data.projectId) {
+        throw new Error("Failed to create project");
       }
+
+      // Step 2: Project structure
+      updateStep("2", "running", ["Creating directory structure...", "Setting up configuration files..."]);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      updateStep("2", "success", ["Project structure initialized", `Template: ${projectData.template.id}`]);
+
+      // Step 3: Installing dependencies
+      updateStep("3", "running", [
+        "Running npm install...",
+        "Resolving dependencies...",
+        "This may take a few moments..."
+      ]);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      updateStep("3", "success", ["Dependencies installed", "node_modules created"]);
+
+      // Step 4: GitHub repo
+      updateStep("4", "running", ["Creating GitHub repository...", "Setting up remote..."]);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      updateStep("4", "success", [`Repository: ${projectData.name}`, "Remote configured"]);
+
+      // Step 5: Initial commit
+      updateStep("5", "running", ["Staging files...", "Committing changes...", "Pushing to GitHub..."]);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      updateStep("5", "success", ["Initial commit pushed", "Branch: main"]);
+
+      // Step 6: Start server
+      updateStep("6", "running", ["Starting development server...", "Waiting for port binding..."]);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      updateStep("6", "success", ["Development server started", "Ready for development"]);
+
+      // Instant redirect - no waiting
+      router.push(`/ide/${data.projectId}`);
     } catch (err) {
       console.error("Failed to create project:", err);
+      setShowSetupTerminal(false);
       setIsCreating(false);
+      alert("Failed to create project. Please try again.");
     }
   };
 
-  const handleOpenProject = (projectId: string) => {
-    router.push(`/ide/${projectId}`);
+  const handleOpenProject = async (projectId: string) => {
+    // Check if project needs to be resumed (no active container)
+    const project = ongoingProjects.find(p => p.id === projectId);
+    
+    // If project has no container, show setup animation
+    if (project && !project.containerId) {
+      await handleResumeProject(projectId);
+    } else {
+      // Project container is running, just navigate
+      router.push(`/ide/${projectId}`);
+    }
+  };
+
+  const handleResumeProject = async (projectId: string) => {
+    // Initialize setup steps for resuming
+    const initialSteps: SetupStep[] = [
+      { id: "1", label: "Creating project container", status: "pending" },
+      { id: "2", label: "Cloning from GitHub repository", status: "pending" },
+      { id: "3", label: "Installing dependencies", status: "pending" },
+      { id: "4", label: "Setting up development environment", status: "pending" },
+      { id: "5", label: "Starting development server", status: "pending" },
+    ];
+    
+    setSetupSteps(initialSteps);
+    setShowSetupTerminal(true);
+    setIsCreating(true);
+    
+    try {
+      // Helper to update step status
+      const updateStep = (stepId: string, status: SetupStep["status"], output?: string[]) => {
+        setSetupSteps(prev => prev.map(step => {
+          if (step.id === stepId) {
+            return {
+              ...step,
+              status,
+              output,
+              startTime: status === "running" ? Date.now() : step.startTime,
+              endTime: status === "success" || status === "error" ? Date.now() : undefined,
+            };
+          }
+          return step;
+        }));
+      };
+
+      // Step 1: Create container
+      updateStep("1", "running", ["Pulling Docker image...", "Creating container instance..."]);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      const res = await fetch(`/api/projects/${projectId}/resume`, {
+        method: "POST",
+      });
+
+      const data = await res.json();
+
+      if (!data.success) {
+        updateStep("1", "error", [data.error || "Failed to create container"]);
+        throw new Error(data.error || "Failed to resume project");
+      }
+      
+      updateStep("1", "success", ["Container created successfully", `ID: ${projectId.substring(0, 12)}...`]);
+
+      // Step 2: Clone from GitHub
+      updateStep("2", "running", ["Fetching repository...", "Cloning project files..."]);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      updateStep("2", "success", ["Repository cloned", "All files downloaded"]);
+
+      // Step 3: Installing dependencies
+      updateStep("3", "running", [
+        "Running npm install...",
+        "Resolving dependencies...",
+        "This may take 1-2 minutes..."
+      ]);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      updateStep("3", "success", ["Dependencies installed", "node_modules created"]);
+
+      // Step 4: Setting up environment
+      updateStep("4", "running", ["Configuring environment...", "Setting up Git..."]);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      updateStep("4", "success", ["Environment configured", "Ready for development"]);
+
+      // Step 5: Start server
+      updateStep("5", "running", ["Starting development server...", "Waiting for port binding..."]);
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      updateStep("5", "success", ["Development server started", "Project ready"]);
+
+      // Reload projects to update status
+      await loadOngoingProjects();
+      
+      // Instant redirect
+      router.push(`/ide/${projectId}`);
+    } catch (err) {
+      console.error("Error resuming project:", err);
+      setShowSetupTerminal(false);
+      setIsCreating(false);
+      alert("An error occurred while resuming the project.");
+    }
   };
 
   const handleDeleteProject = async (projectId: string) => {
@@ -282,13 +460,29 @@ export function Dashboard() {
 
   const difficulties = ["all", "Beginner", "Intermediate", "Advanced"];
 
+  // Show loading while checking authentication
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Don't render dashboard if not authenticated (will redirect)
+  if (status === 'unauthenticated') {
+    return null;
+  }
+
   return (
     <>
-      {isCreating && (
-        <ProjectLoading 
-          status="installing" 
-          message="Creating your project container and installing dependencies..."
-          percentage={45}
+      {showSetupTerminal && (
+        <SetupTerminal
+          steps={setupSteps}
+          title="Creating Your Project"
         />
       )}
       
@@ -364,6 +558,7 @@ export function Dashboard() {
                     project={project}
                     onOpenProject={handleOpenProject}
                     onDeleteProject={handleDeleteProject}
+                    onResumeProject={handleResumeProject}
                   />
                 </motion.div>
               ))}

@@ -22,6 +22,20 @@ export async function POST(
 
     const container = docker.getContainer(id);
     
+    // Check if container exists
+    try {
+      await container.inspect();
+    } catch (err: any) {
+      if (err.statusCode === 404) {
+        return NextResponse.json({ 
+          success: false,
+          error: 'Container not found',
+          message: 'The project container no longer exists. Please restart the project.' 
+        }, { status: 404 });
+      }
+      throw err;
+    }
+    
     // Kill the process by name (|| true makes it not fail if process doesn't exist)
     const killCommand = ['sh', '-c', `pkill -f "${processName}" || true`];
     const output = await execCommand(container, killCommand);
@@ -31,11 +45,17 @@ export async function POST(
       output,
       message: `Process ${processName} killed successfully` 
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error killing process:', error);
+    
+    const status = error.statusCode === 404 ? 404 : 500;
+    const message = error.statusCode === 404 
+      ? 'Container not found' 
+      : 'Failed to kill process';
+      
     return NextResponse.json(
-      { error: 'Failed to kill process', details: String(error) },
-      { status: 500 }
+      { error: message, details: String(error) },
+      { status }
     );
   }
 }

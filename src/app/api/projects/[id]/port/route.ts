@@ -13,11 +13,24 @@ export async function GET(
     const { id: projectId } = await params;
     const container = docker.getContainer(projectId);
     
-    // First, check what ports are actually mapped
-    const inspect = await container.inspect();
+    // Check if container exists
+    let inspect;
+    try {
+      inspect = await container.inspect();
+    } catch (err: any) {
+      if (err.statusCode === 404) {
+        return NextResponse.json(
+          { 
+            error: "Container not found. Please restart the project.",
+            needsRecreation: true
+          },
+          { status: 404 }
+        );
+      }
+      throw err;
+    }
+    
     const portBindings = inspect.NetworkSettings?.Ports || {};
-    console.log('=== Port Detection Debug ===');
-    console.log('Available port mappings:', JSON.stringify(portBindings, null, 2));
     
     // If no ports are mapped, suggest container recreation
     if (Object.keys(portBindings).length === 0) {
@@ -113,8 +126,6 @@ export async function GET(
         setTimeout(resolve, 1000); // Increased timeout
       });
       
-      console.log('Log file content (last 200 chars):', logOutput.slice(-200));
-      
       // Parse multiple patterns:
       // Vite: "➜  Local:   http://localhost:5177/"
       // Next.js: "- Local:        http://localhost:3000"
@@ -203,9 +214,14 @@ export async function GET(
       { status: 404 }
     );
   } catch (err: any) {
+    const status = err.statusCode === 404 ? 404 : 500;
+    const message = err.statusCode === 404 
+      ? 'Container not found' 
+      : `Failed to get port: ${err.message}`;
+      
     return NextResponse.json(
-      { error: `Failed to get port: ${err.message}` },
-      { status: 500 }
+      { error: message },
+      { status }
     );
   }
 }

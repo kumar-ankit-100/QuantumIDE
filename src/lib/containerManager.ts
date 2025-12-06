@@ -884,6 +884,71 @@ button:hover {
 }
 
 /**
+ * Create a blank project with just a README - users install everything themselves
+ */
+export async function createBlankProject(container: Docker.Container, language: string): Promise<void> {
+  console.log(`[${new Date().toISOString()}] Creating blank ${language} project...`);
+
+  const readme = `# ${language} Project
+
+## Welcome to your ${language} development environment!
+
+This is a blank Ubuntu container. You need to install all tools yourself.
+
+### For C++ Development:
+
+\`\`\`bash
+# Install build tools
+apt-get update
+apt-get install -y build-essential g++ gcc cmake make gdb
+
+# Verify installation
+g++ --version
+cmake --version
+\`\`\`
+
+### Create your first program:
+
+\`\`\`bash
+# Create a simple C++ program
+cat > main.cpp << 'EOF'
+#include <iostream>
+
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    return 0;
+}
+EOF
+
+# Compile and run
+g++ main.cpp -o main
+./main
+\`\`\`
+
+### Additional Tools:
+
+\`\`\`bash
+# Install Git
+apt-get install -y git
+
+# Install text editors
+apt-get install -y vim nano
+
+# Install other tools as needed
+apt-get install -y curl wget
+\`\`\`
+
+---
+**Note:** All installations are temporary. They will be lost when the container restarts.
+To persist your setup, create a script that installs everything you need.
+`;
+
+  await writeFileToContainer(container, "README.md", readme);
+
+  console.log(`[${new Date().toISOString()}] Blank ${language} project created (install tools yourself)`);
+}
+
+/**
  * Verify files exist inside container (for cloud IDE architecture)
  */
 export async function verifyContainerFiles(container: Docker.Container): Promise<boolean> {

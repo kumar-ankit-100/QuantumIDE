@@ -111,20 +111,20 @@ const PROJECT_TEMPLATES = [
     estimatedTime: "10-15 min"
   },
   {
-    id: "python-fastapi",
-    name: "Python FastAPI",
-    description: "High-performance Python API with automatic docs",
-    icon: <Rocket className="w-5 h-5 text-red-600" />,
-    techStack: ["Python", "FastAPI", "SQLAlchemy", "Pydantic"],
+    id: "cpp-blank",
+    name: "C++ Project",
+    description: "Empty container for C++ development - install g++, CMake, and tools yourself",
+    icon: <Code2 className="w-5 h-5 text-blue-600" />,
+    techStack: ["C++", "CMake", "GCC/G++", "Make"],
     features: [
-      "Automatic API documentation",
-      "Type hints support",
-      "High performance",
-      "Easy testing",
-      "Database ORM"
+      "Blank Ubuntu container",
+      "Install your own tools",
+      "Full control over setup",
+      "Compile and run C++ code",
+      "Custom build system"
     ],
-    difficulty: "Intermediate" as const,
-    estimatedTime: "5-8 min"
+    difficulty: "Advanced" as const,
+    estimatedTime: "1-2 min (setup)"
   }
 ];
 
@@ -152,13 +152,6 @@ export function Dashboard() {
   const [isCreating, setIsCreating] = useState(false);
   
   const router = useRouter();
-
-  // Redirect to login if not authenticated
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.push('/login');
-    }
-  }, [status, router]);
 
   // Load ongoing projects when authenticated
   useEffect(() => {
@@ -223,6 +216,12 @@ export function Dashboard() {
   });
 
   const handleCreateProject = async (template: typeof PROJECT_TEMPLATES[0]) => {
+    // Check authentication before allowing project creation
+    if (status !== 'authenticated') {
+      router.push('/login?callbackUrl=/dashboard');
+      return;
+    }
+    
     setSelectedTemplate(template);
     setShowModal(true);
   };
@@ -431,26 +430,34 @@ export function Dashboard() {
   };
 
   const handleDeleteProject = async (projectId: string) => {
-    if (!confirm("Are you sure you want to delete this project? This will permanently delete the container and all files inside it.")) {
+    if (!confirm("Are you sure you want to delete this project? This will permanently delete the container, GitHub repository, and all data.")) {
       return;
     }
 
     try {
-      const res = await fetch(`/api/projects/${projectId}/delete`, {
+      // First cleanup the container
+      const cleanupRes = await fetch(`/api/projects/${projectId}/cleanup`, {
+        method: "POST",
+      });
+
+      if (!cleanupRes.ok) {
+        console.warn("Container cleanup failed, continuing with deletion");
+      }
+
+      // Then delete from database and GitHub
+      const deleteRes = await fetch(`/api/projects/${projectId}`, {
         method: "DELETE",
       });
 
-      const data = await res.json();
+      const data = await deleteRes.json();
 
-      if (data.success) {
+      if (deleteRes.ok && data.success) {
         // Reload the projects list
         await loadOngoingProjects();
-        
-        // Show success message (you can add a toast notification here)
         console.log("Project deleted successfully");
       } else {
         console.error("Failed to delete project:", data.error);
-        alert("Failed to delete project. Please try again.");
+        alert(`Failed to delete project: ${data.error || 'Unknown error'}`);
       }
     } catch (err) {
       console.error("Error deleting project:", err);

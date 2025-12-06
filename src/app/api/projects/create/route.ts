@@ -9,6 +9,7 @@ import {
   createNextJSProject,
   createNodeExpressProject,
   createVanillaJSProject,
+  createBlankProject,
   stopAndRemoveContainer,
   verifyContainerFiles,
   listContainerFiles,
@@ -91,9 +92,9 @@ async function createProjectHandler(request: Request) {
       case "vanilla-js":
         await createVanillaJSProject(container);
         break;
-      case "python-fastapi":
-        // TODO: Add Python FastAPI template
-        await createViteProject(container); // Fallback for now
+      case "cpp-blank":
+        // Empty C++ project - just create a README
+        await createBlankProject(container, "C++");
         break;
       default:
         await createViteProject(container);

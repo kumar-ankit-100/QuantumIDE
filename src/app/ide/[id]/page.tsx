@@ -38,6 +38,8 @@ import ChatPanel from './ChatPanel';
 import { ProjectLoading } from '@/components/editor/ProjectLoading';
 import { GitHubStatus } from '@/components/editor/GitHubStatus';
 import FileExplorer from '@/components/editor/FileExplorer';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { CleanupLoading } from '@/components/editor/CleanupLoading';
 
 // Define the props type
 interface MultiTerminalProps {
@@ -87,6 +89,11 @@ export default function IDEPage() {
   const [isResuming, setIsResuming] = useState(false);
   const [isCleaningUp, setIsCleaningUp] = useState(false);
 
+  // Debug: Monitor isCleaningUp state
+  useEffect(() => {
+    console.log('isCleaningUp changed to:', isCleaningUp);
+  }, [isCleaningUp]);
+
   // Note: Container cleanup only happens when user explicitly clicks home button
   // This prevents accidental cleanup on page refresh or browser navigation
 
@@ -94,32 +101,15 @@ export default function IDEPage() {
   useEffect(() => {
     const handleOpenPreview = (event: CustomEvent) => {
       console.log('Preview open event received:', event.detail);
-      const { port, projectType } = event.detail;
       
-      // Immediately load the preview URL
+      // Load preview URL once - WebSocket will handle updates
       loadPreviewUrl();
-      
-      // Poll aggressively for a longer time to catch the server starting
-      let pollCount = 0;
-      const maxPolls = 30; // 30 seconds - dev servers can take time to start
-      const pollInterval = setInterval(async () => {
-        await loadPreviewUrl();
-        pollCount++;
-        
-        if (previewUrl || pollCount >= maxPolls) {
-          clearInterval(pollInterval);
-          if (previewUrl) {
-            console.log('Preview loaded successfully:', previewUrl);
-          } else {
-            console.warn('Preview polling timed out after 30 seconds');
-          }
-        }
-      }, 1000);
+      console.log('Preview will be updated via WebSocket when server is ready');
     };
 
     window.addEventListener('openPreview', handleOpenPreview as EventListener);
     return () => window.removeEventListener('openPreview', handleOpenPreview as EventListener);
-  }, [previewUrl]);
+  }, []);
 
   // Load file tree and metadata
   useEffect(() => {
@@ -155,7 +145,23 @@ export default function IDEPage() {
           }
         } else {
           // Container exists, load preview URL
-          await loadPreviewUrl();
+          const success = await loadPreviewUrl();
+          
+          // If preview URL not immediately available, poll for it
+          if (!success) {
+            console.log('Preview not available yet, starting polling...');
+            let attempts = 0;
+            const pollInterval = setInterval(async () => {
+              attempts++;
+              const loaded = await loadPreviewUrl();
+              if (loaded || attempts > 15) { // Try for ~45 seconds
+                clearInterval(pollInterval);
+                if (!loaded) {
+                  console.warn('Preview URL polling timed out after 15 attempts');
+                }
+              }
+            }, 3000);
+          }
         }
       } catch (err) {
         console.error('Error loading data:', err);
@@ -164,19 +170,38 @@ export default function IDEPage() {
       }
     };
     loadData();
-    
-    // Poll for port updates every 3 seconds to catch when dev server starts
-    // Only poll if server hasn't started yet
-    const portCheckInterval = setInterval(() => {
-      if (!serverStarted) {
-        loadPreviewUrl();
-      }
-    }, 3000);
-    
-    return () => clearInterval(portCheckInterval);
   }, [projectId]);
 
-  const loadPreviewUrl = async () => {
+  // WebSocket connection for real-time updates
+  const { isConnected: wsConnected, subscribe, unsubscribe } = useWebSocket(projectId, {
+    onMessage: (message) => {
+      if (message.type === 'port_update') {
+        console.log('[WebSocket] Port update received:', message);
+        setPreviewUrl(message.url);
+        setHostPort(message.hostPort);
+        setServerStarted(true);
+      }
+    },
+    onConnect: () => {
+      console.log('[WebSocket] Connected, subscribing to port updates');
+      // Load initial port state and retry if needed
+      loadPreviewUrl().then((success) => {
+        if (!success) {
+          console.log('[WebSocket] Initial port load failed, will retry via polling');
+        }
+      });
+    }
+  });
+
+  // Subscribe to port updates on mount
+  useEffect(() => {
+    if (wsConnected) {
+      subscribe('port');
+      return () => unsubscribe('port');
+    }
+  }, [wsConnected]); // Removed subscribe/unsubscribe from deps to prevent infinite loop
+
+  const loadPreviewUrl = async (): Promise<boolean> => {
     try {
       // Add timestamp to prevent caching
       const res = await fetch(`/api/projects/${projectId}/port?t=${Date.now()}`);
@@ -202,22 +227,27 @@ export default function IDEPage() {
           }
         }
         
-        return;
+        return false;
       }
       
       const data = await res.json();
       if (data.previewUrl && data.hostPort) {
+        console.log('Preview URL loaded successfully:', data.previewUrl);
         setPreviewUrl(data.previewUrl);
         setHostPort(data.hostPort);
         setServerStarted(true);
+        return true;
       } else {
         setPreviewUrl('');
         setHostPort(null);
+        return false;
       }
     } catch (err) {
       // Silently fail - container might not exist yet
+      console.log('Failed to load preview URL:', err);
       setPreviewUrl('');
       setHostPort(null);
+      return false;
     }
   };
 
@@ -254,6 +284,7 @@ export default function IDEPage() {
       return;
     }
     
+    console.log('Starting cleanup process...');
     setIsCleaningUp(true);
     
     try {
@@ -266,11 +297,17 @@ export default function IDEPage() {
       await fetch(`/api/projects/${projectId}/cleanup`, {
         method: 'POST',
       });
+      
+      console.log('Cleanup complete, showing animation...');
+      // Delay to show the full animation
+      await new Promise(resolve => setTimeout(resolve, 3000));
     } catch (err) {
       console.error('Failed to cleanup container:', err);
     } finally {
+      console.log('Navigating to dashboard...');
       // Navigate to home regardless of cleanup success
-      router.push('/');
+      router.push('/dashboard');
+      setIsCleaningUp(false);
     }
   };
 
@@ -572,6 +609,9 @@ export default function IDEPage() {
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      {/* Cleanup Loading Overlay */}
+      {isCleaningUp && <CleanupLoading />}
+      
       {/* Header with gradient */}
       <div className="border-b border-slate-800/50 bg-gradient-to-r from-slate-900/90 via-slate-800/90 to-slate-900/90 backdrop-blur-sm">
         <div className="px-4 py-3 flex items-center justify-between">
